@@ -1,0 +1,44 @@
+{
+  "name": "craftdock",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestor local de servidores Minecraft Java, Bedrock y Crossplay para Windows",
+  "scripts": {
+    "dev:server": "bun --watch server/index.ts",
+    "dev:web": "vite",
+    "dev": "bun scripts/dev.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "build:web": "vite build",
+    "build:exe": "bun scripts/build-exe.ts",
+    "package:zip": "bun scripts/package-release.ts"
+  },
+  "dependencies": {
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
+    "@uiw/react-codemirror": "^4.23.13",
+    "archiver": "^7.0.1",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "yauzl": "^3.2.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/bun": "^1.2.15",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/yauzl": "^2.10.3",
+    "@vitejs/plugin-react": "^4.5.2",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.4",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

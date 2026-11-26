@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build outputs & release binaries (published via GitHub Releases)
+dist/
+
+# Local runtime data & databases
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.local
