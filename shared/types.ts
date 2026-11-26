@@ -3,6 +3,7 @@ export type ServerEngine =
   | "paper"
   | "fabric"
   | "forge"
+  | "neoforge"
   | "bedrock"
   | "custom";
 
@@ -165,8 +166,34 @@ export interface ModrinthSearchHit {
   iconUrl: string | null;
   downloads: number;
   author: string;
-  projectType: "mod" | "plugin" | "modpack";
+  projectType: "mod" | "plugin" | "modpack" | "datapack";
   categories: string[];
+  versions?: string[];
+  serverSide?: string;
+}
+
+export interface ModpackVersionOption {
+  versionId: string;
+  name: string;
+  versionNumber: string;
+  gameVersions: string[];
+  loaders: string[];
+  detectedEngine: "fabric" | "forge" | "neoforge" | null;
+  mcVersion: string;
+  mrpackUrl: string;
+  mrpackSha1?: string;
+  fileName: string;
+  fileSize: number;
+  datePublished: string;
+}
+
+export interface DatapackItem {
+  fileName: string;
+  enabled: boolean;
+  isDirectory: boolean;
+  sizeBytes: number;
+  modifiedAt: string;
+  worldName: string;
 }
 
 export interface BackupRecord {

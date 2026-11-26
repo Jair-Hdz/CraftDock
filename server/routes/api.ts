@@ -11,6 +11,14 @@ import {
   restoreServerBackup,
 } from "../services/backupService";
 import {
+  deleteDatapack,
+  installDatapackFromModrinth,
+  listDatapacks,
+  searchModrinthDatapacks,
+  toggleDatapack,
+  uploadDatapackZip,
+} from "../services/datapackService";
+import {
   createServerEntry,
   deleteServerEntry,
   listServerFiles,
@@ -33,7 +41,9 @@ import {
   importMrpackModpack,
   installFromModrinth,
   listInstalledMods,
+  listModpackVersions,
   searchModrinth,
+  searchModrinthModpacks,
   toggleInstalledMod,
   uploadModJar,
 } from "../services/modrinthService";
@@ -58,7 +68,7 @@ export interface ApiContext {
 
 const createServerSchema = z.object({
   name: z.string().min(1, "Escribe un nombre para el servidor").max(60),
-  engine: z.enum(["vanilla", "paper", "fabric", "forge", "bedrock", "custom"]),
+  engine: z.enum(["vanilla", "paper", "fabric", "forge", "neoforge", "bedrock", "custom"]),
   mcVersion: z.string().optional(),
   build: z.string().optional(),
   jarId: z.string().optional(),
@@ -210,9 +220,64 @@ export async function handleApiRequest(req: Request, ctx: ApiContext): Promise<R
       return json({ tunnel });
     }
 
+    // ---- Global Modpacks (Modrinth Direct) ----
+    if (pathname === "/api/modpacks/search" && method === "GET") {
+      const query = url.searchParams.get("q") || "";
+      const mcVersion = url.searchParams.get("mcVersion") || undefined;
+      const loaderParam = url.searchParams.get("loader") || undefined;
+      const loader =
+        loaderParam === "fabric" || loaderParam === "forge" || loaderParam === "neoforge"
+          ? loaderParam
+          : undefined;
+      const hits = await searchModrinthModpacks({ query, mcVersion, loader });
+      return json({ hits });
+    }
+
+    const modpackVerMatch = pathname.match(/^\/api\/modpacks\/([^/]+)\/versions$/);
+    if (modpackVerMatch && method === "GET") {
+      const projectId = modpackVerMatch[1];
+      const mcVersion = url.searchParams.get("mcVersion") || undefined;
+      const loaderParam = url.searchParams.get("loader") || undefined;
+      const loader =
+        loaderParam === "fabric" || loaderParam === "forge" || loaderParam === "neoforge"
+          ? loaderParam
+          : undefined;
+      const versions = await listModpackVersions(projectId, { mcVersion, loader });
+      return json({ versions });
+    }
+
     // ---- Servers CRUD ----
     if (pathname === "/api/servers" && method === "GET") {
       return json({ servers: ctx.serverManager.listServerViews() });
+    }
+
+    if (pathname === "/api/servers/from-modpack" && method === "POST") {
+      const body = (await req.json()) as {
+        name?: string;
+        modpackVersionId?: string;
+        ramMinMb?: number;
+        ramMaxMb?: number;
+        onlineMode?: boolean;
+        gamemode?: string;
+        difficulty?: string;
+        maxPlayers?: number;
+        eulaAccepted?: boolean;
+      };
+      if (!body.modpackVersionId) {
+        return errorJson("Debes seleccionar una versión de modpack de Modrinth.");
+      }
+      const result = await ctx.serverManager.createServerFromModpack({
+        name: body.name,
+        modpackVersionId: body.modpackVersionId,
+        ramMinMb: body.ramMinMb,
+        ramMaxMb: body.ramMaxMb,
+        onlineMode: body.onlineMode,
+        gamemode: body.gamemode,
+        difficulty: body.difficulty,
+        maxPlayers: body.maxPlayers,
+        eulaAccepted: Boolean(body.eulaAccepted),
+      });
+      return json(result, 201);
     }
 
     if (pathname === "/api/servers" && method === "POST") {
@@ -422,6 +487,15 @@ export async function handleApiRequest(req: Request, ctx: ApiContext): Promise<R
         const result = await installFromModrinth(serverDir, server, body.projectId);
         return json(result, 201);
       }
+      if (sub === "mods/modrinth/install-modpack" && method === "POST") {
+        const body = (await req.json()) as { modpackVersionId?: string };
+        if (!body.modpackVersionId) return errorJson("Falta modpackVersionId.");
+        const result = await ctx.serverManager.installModpackOnExistingServer(
+          serverId,
+          body.modpackVersionId
+        );
+        return json(result, 201);
+      }
       if (sub === "mods/mrpack" && method === "POST") {
         const form = await req.formData();
         const file = form.get("file");
@@ -447,6 +521,50 @@ export async function handleApiRequest(req: Request, ctx: ApiContext): Promise<R
             "Content-Disposition": `attachment; filename="${fileName}"`,
           },
         });
+      }
+
+      // Datapacks (Java <world>/datapacks/)
+      if (sub === "datapacks" && method === "GET") {
+        return json(listDatapacks(serverDir, server));
+      }
+      if (sub === "datapacks/upload" && method === "POST") {
+        const form = await req.formData();
+        const file = form.get("file");
+        if (!(file instanceof File)) return errorJson("Adjunta un archivo .zip de datapack.");
+        const datapack = uploadDatapackZip(
+          serverDir,
+          server,
+          file.name,
+          new Uint8Array(await file.arrayBuffer())
+        );
+        return json({ datapack }, 201);
+      }
+      if (sub === "datapacks/toggle" && method === "POST") {
+        const body = (await req.json()) as { fileName?: string };
+        if (!body.fileName) return errorJson("Falta fileName.");
+        const datapack = toggleDatapack(serverDir, server, body.fileName);
+        return json({ datapack });
+      }
+      if (sub === "datapacks/delete" && method === "POST") {
+        const body = (await req.json()) as { fileName?: string };
+        if (!body.fileName) return errorJson("Falta fileName.");
+        deleteDatapack(serverDir, server, body.fileName);
+        return json({ ok: true });
+      }
+      if (sub === "datapacks/reload" && method === "POST") {
+        ctx.serverManager.sendCommand(serverId, "reload");
+        return json({ ok: true });
+      }
+      if (sub === "datapacks/modrinth/search" && method === "GET") {
+        const query = url.searchParams.get("q") || "";
+        const hits = await searchModrinthDatapacks(query, server.mcVersion);
+        return json({ hits });
+      }
+      if (sub === "datapacks/modrinth/install" && method === "POST") {
+        const body = (await req.json()) as { projectId?: string };
+        if (!body.projectId) return errorJson("Falta projectId.");
+        const result = await installDatapackFromModrinth(serverDir, server, body.projectId);
+        return json(result, 201);
       }
 
       // Worlds & Backups

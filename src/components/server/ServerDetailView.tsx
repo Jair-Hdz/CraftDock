@@ -10,6 +10,7 @@ import {
   Settings,
   Users,
   Package,
+  Puzzle,
   Archive,
   FolderOpen,
   AlertTriangle,
@@ -34,10 +35,11 @@ import type {
 import { api, formatUptime, resizeImageTo64Png } from "../../lib/api";
 import { Button, EngineBadge, RamSelector, StatusBadge } from "../ui/Primitives";
 import { BackupsWorldsTab } from "./BackupsWorldsTab";
+import { DatapacksTab } from "./DatapacksTab";
 import { FileLibraryTab } from "./FileLibraryTab";
 import { ModsPluginsTab } from "./ModsPluginsTab";
 
-type DetailTab = "console" | "settings" | "players" | "mods" | "backups" | "files";
+type DetailTab = "console" | "settings" | "players" | "mods" | "datapacks" | "backups" | "files";
 
 export function ServerDetailView({
   server,
@@ -342,6 +344,7 @@ export function ServerDetailView({
           { id: "settings", label: "Ajustes y .JAR", icon: Settings },
           { id: "players", label: "Jugadores", icon: Users },
           { id: "mods", label: "Mods / Plugins", icon: Package },
+          { id: "datapacks", label: "Datapacks", icon: Puzzle },
           { id: "backups", label: "Mundos y Backups", icon: Archive },
           { id: "files", label: "Archivos y Editor", icon: FolderOpen },
         ].map((item) => {
@@ -966,7 +969,10 @@ export function ServerDetailView({
         />
       )}
 
-      {/* TAB 5: BACKUPS & WORLDS */}
+      {/* TAB 5: DATAPACKS */}
+      {tab === "datapacks" && <DatapacksTab server={server} onToast={onToast} />}
+
+      {/* TAB 6: BACKUPS & WORLDS */}
       {tab === "backups" && (
         <BackupsWorldsTab
           server={server}

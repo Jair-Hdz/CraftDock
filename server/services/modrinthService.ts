@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { ModItem, ModrinthSearchHit, ServerRecord } from "../../shared/types";
+import type {
+  ModItem,
+  ModpackVersionOption,
+  ModrinthSearchHit,
+  ServerRecord,
+} from "../../shared/types";
 import { eventBus } from "../utils/eventBus";
 import { downloadFile, fetchJson } from "../utils/http";
 import { resolveSafeChildPath, sanitizeFileName } from "../utils/paths";
@@ -11,7 +16,9 @@ const MODRINTH_API = "https://api.modrinth.com/v2";
 
 export function getModFolderForServer(server: ServerRecord): "mods" | "plugins" | null {
   if (server.engine === "paper") return "plugins";
-  if (server.engine === "fabric" || server.engine === "forge") return "mods";
+  if (server.engine === "fabric" || server.engine === "forge" || server.engine === "neoforge") {
+    return "mods";
+  }
   if (server.engine === "custom") return "plugins";
   return null;
 }
@@ -144,6 +151,8 @@ export async function searchModrinth(params: {
     facets.push(["categories:fabric"]);
   } else if (params.engine === "forge") {
     facets.push(["categories:forge"]);
+  } else if (params.engine === "neoforge") {
+    facets.push(["categories:neoforge"]);
   }
 
   const qs = new URLSearchParams({
@@ -187,6 +196,8 @@ export async function installFromModrinth(
       ? ["fabric"]
       : server.engine === "forge"
       ? ["forge"]
+      : server.engine === "neoforge"
+      ? ["neoforge"]
       : [];
 
   const qs = new URLSearchParams();
@@ -375,6 +386,189 @@ export async function importMrpackModpack(
   } finally {
     fs.rmSync(tempPack, { force: true });
   }
+}
+
+export function detectModpackEngine(
+  loaders: string[]
+): "fabric" | "forge" | "neoforge" | null {
+  const lower = loaders.map((l) => l.toLowerCase());
+  if (lower.includes("neoforge")) return "neoforge";
+  if (lower.includes("fabric")) return "fabric";
+  if (lower.includes("forge")) return "forge";
+  return null;
+}
+
+export async function searchModrinthModpacks(options: {
+  query: string;
+  mcVersion?: string;
+  loader?: "fabric" | "forge" | "neoforge";
+  limit?: number;
+}): Promise<ModrinthSearchHit[]> {
+  const facets: string[][] = [
+    ["project_type:modpack"],
+    ["server_side:required", "server_side:optional"],
+  ];
+
+  if (options.loader) {
+    facets.push([`categories:${options.loader}`]);
+  } else {
+    facets.push(["categories:fabric", "categories:forge", "categories:neoforge"]);
+  }
+
+  if (options.mcVersion && options.mcVersion !== "custom") {
+    facets.push([`versions:${options.mcVersion}`]);
+  }
+
+  const qs = new URLSearchParams({
+    query: options.query || "",
+    limit: String(options.limit || 20),
+    facets: JSON.stringify(facets),
+  });
+
+  const data = await fetchJson<{ hits: any[] }>(`${MODRINTH_API}/search?${qs.toString()}`);
+  return (data.hits || []).map((hit) => ({
+    projectId: hit.project_id,
+    slug: hit.slug,
+    title: hit.title,
+    description: hit.description || "",
+    iconUrl: hit.icon_url || null,
+    downloads: hit.downloads || 0,
+    author: hit.author || "Desconocido",
+    projectType: "modpack",
+    categories: Array.isArray(hit.categories) ? hit.categories : [],
+    versions: Array.isArray(hit.versions) ? hit.versions : [],
+    serverSide: hit.server_side,
+  }));
+}
+
+export async function listModpackVersions(
+  projectId: string,
+  options?: { mcVersion?: string; loader?: "fabric" | "forge" | "neoforge" }
+): Promise<ModpackVersionOption[]> {
+  const qs = new URLSearchParams();
+  if (options?.loader) {
+    qs.set("loaders", JSON.stringify([options.loader]));
+  }
+  if (options?.mcVersion && options.mcVersion !== "custom") {
+    qs.set("game_versions", JSON.stringify([options.mcVersion]));
+  }
+
+  const raw = await fetchJson<any[]>(
+    `${MODRINTH_API}/project/${encodeURIComponent(projectId)}/version?${qs.toString()}`
+  );
+
+  const results: ModpackVersionOption[] = [];
+  for (const v of raw || []) {
+    const detectedEngine = detectModpackEngine(Array.isArray(v.loaders) ? v.loaders : []);
+    if (!detectedEngine) continue;
+
+    const mrpackFile =
+      v.files?.find((f: any) => String(f.filename || "").toLowerCase().endsWith(".mrpack")) ||
+      v.files?.find((f: any) => f.primary) ||
+      v.files?.[0];
+    if (!mrpackFile?.url) continue;
+
+    const gameVersions = Array.isArray(v.game_versions) ? v.game_versions : [];
+    const mcVersion = gameVersions[0] || "";
+    if (!mcVersion) continue;
+
+    results.push({
+      versionId: v.id,
+      name: v.name || v.version_number || v.id,
+      versionNumber: v.version_number || v.id,
+      gameVersions,
+      loaders: Array.isArray(v.loaders) ? v.loaders : [],
+      detectedEngine,
+      mcVersion,
+      mrpackUrl: mrpackFile.url,
+      mrpackSha1: mrpackFile.hashes?.sha1,
+      fileName: mrpackFile.filename || `${v.id}.mrpack`,
+      fileSize: mrpackFile.size || 0,
+      datePublished: v.date_published || new Date().toISOString(),
+    });
+  }
+
+  return results.slice(0, 30);
+}
+
+export async function resolveModpackVersionDownload(versionId: string): Promise<{
+  mrpackBytes: Uint8Array;
+  index: MrpackIndex;
+  engine: "fabric" | "forge" | "neoforge";
+  mcVersion: string;
+  loaderVersion?: string;
+}> {
+  const versionMeta = await fetchJson<any>(
+    `${MODRINTH_API}/version/${encodeURIComponent(versionId)}`
+  );
+  const mrpackFile =
+    versionMeta.files?.find((f: any) => String(f.filename || "").toLowerCase().endsWith(".mrpack")) ||
+    versionMeta.files?.find((f: any) => f.primary) ||
+    versionMeta.files?.[0];
+
+  if (!mrpackFile?.url) {
+    throw new Error("Esta versión de modpack no tiene archivo .mrpack descargable.");
+  }
+
+  const res = await fetch(mrpackFile.url, {
+    headers: { "User-Agent": "CraftDock/1.0.0 (Windows Local Minecraft Manager)" },
+    redirect: "follow",
+  });
+  if (!res.ok) {
+    throw new Error(`No se pudo descargar el .mrpack desde Modrinth (HTTP ${res.status}).`);
+  }
+  const mrpackBytes = new Uint8Array(await res.arrayBuffer());
+  if (!isZipMagicBytes(mrpackBytes)) {
+    throw new Error("El paquete descargado desde Modrinth no es un .mrpack válido.");
+  }
+
+  // Inspect modrinth.index.json via temp file
+  const tmpFile = path.join(
+    process.env.TEMP || process.cwd(),
+    `craftdock-inspect-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.mrpack`
+  );
+  fs.writeFileSync(tmpFile, mrpackBytes);
+  let indexRaw: string | null = null;
+  try {
+    indexRaw = await readZipEntryText(tmpFile, "modrinth.index.json");
+  } finally {
+    fs.rmSync(tmpFile, { force: true });
+  }
+
+  if (!indexRaw) {
+    throw new Error("El modpack descargado no contiene modrinth.index.json.");
+  }
+  const index = JSON.parse(indexRaw) as MrpackIndex;
+  const deps = index.dependencies || {};
+
+  let engine: "fabric" | "forge" | "neoforge" | null = null;
+  let loaderVersion: string | undefined;
+
+  if (deps["neoforge"]) {
+    engine = "neoforge";
+    loaderVersion = deps["neoforge"];
+  } else if (deps["fabric-loader"]) {
+    engine = "fabric";
+    loaderVersion = deps["fabric-loader"];
+  } else if (deps["forge"]) {
+    engine = "forge";
+    loaderVersion = deps["forge"];
+  } else {
+    engine = detectModpackEngine(Array.isArray(versionMeta.loaders) ? versionMeta.loaders : []);
+  }
+
+  if (!engine) {
+    throw new Error(
+      "Este modpack usa un motor no soportado por CraftDock (solo Fabric, Forge y NeoForge)."
+    );
+  }
+
+  const mcVersion = deps["minecraft"] || versionMeta.game_versions?.[0];
+  if (!mcVersion) {
+    throw new Error("No se pudo detectar la versión de Minecraft requerida por el modpack.");
+  }
+
+  return { mrpackBytes, index, engine, mcVersion, loaderVersion };
 }
 
 export async function exportModsPackForFriends(

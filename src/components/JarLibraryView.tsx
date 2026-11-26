@@ -17,6 +17,7 @@ const OFFICIAL_ENGINES: Array<{ id: Exclude<ServerEngine, "custom">; label: stri
   { id: "paper", label: "Paper", desc: "Alto rendimiento + plugins (PaperMC v3)" },
   { id: "vanilla", label: "Java Vanilla", desc: "Oficial de Mojang" },
   { id: "fabric", label: "Fabric", desc: "Mods modernos (Fabric Meta v2)" },
+  { id: "neoforge", label: "NeoForge", desc: "Mods modernos 1.20.4+ / 1.21+ (Maven)" },
   { id: "forge", label: "Forge", desc: "Instalador oficial de Forge Maven" },
   { id: "bedrock", label: "Bedrock", desc: "Servidor oficial Windows (.zip)" },
 ];
@@ -214,7 +215,7 @@ export function JarLibraryView({
       {/* TAB 2: OFFICIAL CATALOG */}
       {tab === "official" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {OFFICIAL_ENGINES.map((eng) => (
               <button
                 key={eng.id}

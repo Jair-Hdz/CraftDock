@@ -9,8 +9,14 @@ import {
   Power,
   Loader2,
   FolderArchive,
+  ShieldCheck,
 } from "lucide-react";
-import type { ModItem, ModrinthSearchHit, ServerView } from "../../../shared/types";
+import type {
+  ModItem,
+  ModpackVersionOption,
+  ModrinthSearchHit,
+  ServerView,
+} from "../../../shared/types";
 import { api, formatBytes } from "../../lib/api";
 import { Button } from "../ui/Primitives";
 
@@ -26,15 +32,28 @@ export function ModsPluginsTab({
   const [mods, setMods] = useState<ModItem[]>([]);
   const [folder, setFolder] = useState<"mods" | "plugins" | null>(null);
   const [loading, setLoading] = useState(true);
-  const [subTab, setSubTab] = useState<"installed" | "modrinth">(
+  const [subTab, setSubTab] = useState<"installed" | "modrinth" | "modpacks">(
     initialSearchQuery ? "modrinth" : "installed"
   );
 
-  // Modrinth search
+  // Modrinth search (mods / plugins)
   const [query, setQuery] = useState(initialSearchQuery);
   const [hits, setHits] = useState<ModrinthSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
+
+  // Modrinth Modpacks search (direct install into existing server)
+  const [packQuery, setPackQuery] = useState("");
+  const [packHits, setPackHits] = useState<ModrinthSearchHit[]>([]);
+  const [searchingPacks, setSearchingPacks] = useState(false);
+  const [expandedPackId, setExpandedPackId] = useState<string | null>(null);
+  const [packVersions, setPackVersions] = useState<ModpackVersionOption[]>([]);
+  const [loadingPackVer, setLoadingPackVer] = useState(false);
+  const [installingPackVerId, setInstallingPackVerId] = useState<string | null>(null);
+
+  const isOnline = server.status === "running" || server.status === "starting";
+  const isMods =
+    server.engine === "fabric" || server.engine === "forge" || server.engine === "neoforge";
 
   const loadMods = async () => {
     setLoading(true);
@@ -73,9 +92,25 @@ export function ModsPluginsTab({
     }
   };
 
+  const runModpacksSearch = async (q: string) => {
+    setSearchingPacks(true);
+    try {
+      const loader = isMods ? server.engine : undefined;
+      const res = await api.searchModpacks(q, loader, server.mcVersion);
+      setPackHits(res.hits);
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setSearchingPacks(false);
+    }
+  };
+
   useEffect(() => {
     if (subTab === "modrinth" && hits.length === 0) {
       void runModrinthSearch(query);
+    }
+    if (subTab === "modpacks" && packHits.length === 0) {
+      void runModpacksSearch(packQuery);
     }
   }, [subTab]);
 
@@ -122,6 +157,55 @@ export function ModsPluginsTab({
     }
   };
 
+  const handleExpandModpack = async (projectId: string) => {
+    if (expandedPackId === projectId) {
+      setExpandedPackId(null);
+      return;
+    }
+    setExpandedPackId(projectId);
+    setLoadingPackVer(true);
+    try {
+      const res = await api.listModpackVersions(
+        projectId,
+        isMods ? server.engine : undefined,
+        server.mcVersion
+      );
+      setPackVersions(res.versions);
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setLoadingPackVer(false);
+    }
+  };
+
+  const handleInstallModpackDirect = async (ver: ModpackVersionOption, packTitle: string) => {
+    if (isOnline) {
+      onToast("error", "Apaga el servidor antes de instalar un modpack.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `¿Instalar el modpack "${packTitle}" (${ver.name}) en este servidor? CraftDock hará un respaldo automático de seguridad antes de instalar los archivos.`
+      )
+    ) {
+      return;
+    }
+    setInstallingPackVerId(ver.versionId);
+    try {
+      const res = await api.installModpackOnServer(server.id, ver.versionId);
+      onToast(
+        "success",
+        `Modpack "${res.packName}" instalado (${res.downloadedCount} archivos, ${res.skippedClientOnly} solo-cliente omitidos).`
+      );
+      await loadMods();
+      setSubTab("installed");
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setInstallingPackVerId(null);
+    }
+  };
+
   if (server.engine === "vanilla" || server.engine === "bedrock") {
     return (
       <div className="bg-surface border border-border-subtle rounded-xl p-8 text-center">
@@ -133,14 +217,13 @@ export function ModsPluginsTab({
         </h3>
         <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
           {server.engine === "vanilla"
-            ? "Si quieres usar plugins o mods, cambia el archivo .jar de este servidor a Paper, Fabric o Forge en la pestaña Ajustes (se hace respaldo automático antes)."
+            ? "Si quieres usar plugins o mods, cambia el archivo .jar de este servidor a Paper, Fabric, NeoForge o Forge en la pestaña Ajustes (se hace respaldo automático antes), o usa Datapacks en la pestaña Datapacks."
             : "Puedes administrar tus packs directamente desde la pestaña Archivos (development_behavior_packs / resource_packs)."}
         </p>
       </div>
     );
   }
 
-  const isMods = server.engine === "fabric" || server.engine === "forge";
   const label = isMods ? "Mods" : "Plugins";
 
   return (
@@ -166,8 +249,20 @@ export function ModsPluginsTab({
                 : "text-text-secondary hover:text-text-primary"
             }`}
           >
-            Buscar en Modrinth
+            {label} (Modrinth)
           </button>
+          {isMods && (
+            <button
+              onClick={() => setSubTab("modpacks")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                subTab === "modpacks"
+                  ? "bg-emerald-mc text-[#06180D] font-semibold"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Modpacks Directos
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -190,7 +285,7 @@ export function ModsPluginsTab({
             <>
               <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-elevated border border-border-strong hover:bg-[#252E3D] text-xs font-medium cursor-pointer">
                 <FolderArchive className="w-3.5 h-3.5 text-sky-400" />
-                Importar .mrpack
+                Subir .mrpack
                 <input
                   type="file"
                   accept=".mrpack,.zip"
@@ -236,13 +331,18 @@ export function ModsPluginsTab({
                 Aún no hay {label.toLowerCase()} instalados
               </p>
               <p className="text-xs text-text-secondary mt-1">
-                Arrastra archivos <code className="font-mono">.jar</code> aquí o búscalos directo
-                en <strong>Modrinth</strong> filtrados para {server.engine} {server.mcVersion}.
+                Arrastra archivos <code className="font-mono">.jar</code> aquí, instálalos desde{" "}
+                <strong>Modrinth</strong> o aplica un <strong>Modpack directo</strong>.
               </p>
-              <div className="mt-4">
+              <div className="mt-4 flex items-center justify-center gap-2">
                 <Button size="sm" onClick={() => setSubTab("modrinth")}>
-                  Explorar Modrinth
+                  Explorar {label}
                 </Button>
+                {isMods && (
+                  <Button size="sm" variant="secondary" onClick={() => setSubTab("modpacks")}>
+                    Explorar Modpacks
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
@@ -303,7 +403,7 @@ export function ModsPluginsTab({
         </div>
       )}
 
-      {/* MODRINTH SEARCH */}
+      {/* MODRINTH INDIVIDUAL MODS / PLUGINS */}
       {subTab === "modrinth" && (
         <div className="space-y-3">
           <form
@@ -372,6 +472,134 @@ export function ModsPluginsTab({
               No se encontraron resultados compatibles para {server.engine} {server.mcVersion}.
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODRINTH DIRECT MODPACKS */}
+      {subTab === "modpacks" && isMods && (
+        <div className="space-y-3">
+          <div className="bg-emerald-500/8 border border-emerald-500/25 rounded-xl px-4 py-3 flex items-center gap-3 text-xs text-emerald-200">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              Mostrando modpacks de Modrinth compatibles con{" "}
+              <strong className="font-mono uppercase">{server.engine}</strong>{" "}
+              <strong className="font-mono">v{server.mcVersion}</strong>. CraftDock crea un respaldo
+              automático antes de instalar cualquier modpack.
+            </span>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runModpacksSearch(packQuery);
+            }}
+            className="flex gap-2"
+          >
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={packQuery}
+                onChange={(e) => setPackQuery(e.target.value)}
+                placeholder={`Buscar modpacks para ${server.engine} ${server.mcVersion}...`}
+                className="w-full bg-surface border border-border-strong rounded-lg pl-10 pr-4 py-2 text-sm text-text-primary focus:outline-none focus:border-emerald-mc"
+              />
+            </div>
+            <Button type="submit" loading={searchingPacks}>
+              Buscar Modpacks
+            </Button>
+          </form>
+
+          <div className="space-y-2.5">
+            {packHits.map((hit) => {
+              const expanded = expandedPackId === hit.projectId;
+              return (
+                <div
+                  key={hit.projectId}
+                  className="bg-surface border border-border-subtle rounded-xl overflow-hidden"
+                >
+                  <div className="p-4 flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-lg bg-elevated border border-border-subtle overflow-hidden shrink-0 flex items-center justify-center">
+                      {hit.iconUrl ? (
+                        <img
+                          src={hit.iconUrl}
+                          alt={hit.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <FolderArchive className="w-5 h-5 text-text-muted" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h4 className="text-sm font-semibold text-text-primary">{hit.title}</h4>
+                          <p className="text-[11px] text-text-muted">
+                            por {hit.author} • {hit.downloads.toLocaleString("es")} descargas
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={expanded ? "secondary" : "primary"}
+                          onClick={() => void handleExpandModpack(hit.projectId)}
+                        >
+                          {expanded ? "Ocultar versiones" : "Elegir versión"}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-text-secondary mt-1.5">{hit.description}</p>
+                    </div>
+                  </div>
+
+                  {expanded && (
+                    <div className="border-t border-border-subtle bg-canvas/70 px-4 py-3 space-y-2">
+                      {loadingPackVer ? (
+                        <div className="flex items-center gap-2 text-xs text-text-secondary py-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                          Cargando versiones compatibles...
+                        </div>
+                      ) : packVersions.length === 0 ? (
+                        <p className="text-xs text-text-muted">
+                          No hay versiones publicadas exactamente para {server.engine}{" "}
+                          {server.mcVersion}.
+                        </p>
+                      ) : (
+                        packVersions.slice(0, 8).map((ver) => (
+                          <div
+                            key={ver.versionId}
+                            className="flex flex-wrap items-center justify-between gap-2 bg-surface border border-border-subtle rounded-lg px-3 py-2"
+                          >
+                            <div className="text-xs">
+                              <span className="font-semibold text-text-primary">{ver.name}</span>
+                              <span className="ml-2 font-mono text-text-muted">
+                                MC {ver.mcVersion} • {ver.detectedEngine?.toUpperCase()}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              disabled={isOnline}
+                              loading={installingPackVerId === ver.versionId}
+                              onClick={() => void handleInstallModpackDirect(ver, hit.title)}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Instalar Pack
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {!searchingPacks && packHits.length === 0 && (
+              <div className="bg-surface border border-border-subtle rounded-xl py-10 text-center text-sm text-text-muted">
+                No se encontraron modpacks para {server.engine} {server.mcVersion}. También puedes
+                crear un servidor nuevo eligiendo <strong>Modpack Directo (Modrinth)</strong> para
+                que detecte automáticamente cualquier versión.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

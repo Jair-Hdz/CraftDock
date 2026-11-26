@@ -9,9 +9,14 @@ import {
   Package,
   Check,
   Loader2,
+  Flame,
+  FolderArchive,
+  Search,
 } from "lucide-react";
 import type {
   JarLibraryItem,
+  ModpackVersionOption,
+  ModrinthSearchHit,
   RemoteVersionOption,
   ServerEngine,
   SystemInfo,
@@ -19,8 +24,10 @@ import type {
 import { api } from "../lib/api";
 import { Button, Modal, RamSelector } from "./ui/Primitives";
 
+type CreateChoice = ServerEngine | "crossplay" | "modpack";
+
 interface EngineCardDef {
-  id: ServerEngine | "crossplay";
+  id: CreateChoice;
   title: string;
   desc: string;
   icon: React.ReactNode;
@@ -43,6 +50,13 @@ const ENGINE_CARDS: EngineCardDef[] = [
     tag: "Todos juntos",
   },
   {
+    id: "modpack",
+    title: "Modpack Directo (Modrinth)",
+    desc: "Busca un modpack y CraftDock instala motor, Java y mods en 1 clic.",
+    icon: <FolderArchive className="w-5 h-5 text-emerald-400" />,
+    tag: "1 Clic",
+  },
+  {
     id: "vanilla",
     title: "Java Vanilla Oficial",
     desc: "Minecraft puro directo de Mojang, sin modificaciones.",
@@ -54,6 +68,13 @@ const ENGINE_CARDS: EngineCardDef[] = [
     title: "Fabric (Mods modernos)",
     desc: "Rápido y ligero, ideal para mods actuales de Modrinth.",
     icon: <Package className="w-5 h-5 text-yellow-400" />,
+    tag: "Mods",
+  },
+  {
+    id: "neoforge",
+    title: "NeoForge (Mods 1.21+)",
+    desc: "Sucesor moderno de Forge para los modpacks nuevos de 1.20.4+ y 1.21+.",
+    icon: <Flame className="w-5 h-5 text-amber-400" />,
     tag: "Mods",
   },
   {
@@ -96,7 +117,7 @@ export function CreateServerModal({
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState("Mi Mundo Survival");
-  const [choice, setChoice] = useState<ServerEngine | "crossplay">("paper");
+  const [choice, setChoice] = useState<CreateChoice>("paper");
   const [versions, setVersions] = useState<RemoteVersionOption[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [mcVersion, setMcVersion] = useState("");
@@ -108,23 +129,57 @@ export function CreateServerModal({
   const [eulaAccepted, setEulaAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const actualEngine: ServerEngine = choice === "crossplay" ? "paper" : choice;
+  // Direct Modrinth Modpack state
+  const [modpackQuery, setModpackQuery] = useState("");
+  const [modpackLoaderFilter, setModpackLoaderFilter] = useState<"" | "fabric" | "forge" | "neoforge">("");
+  const [modpackHits, setModpackHits] = useState<ModrinthSearchHit[]>([]);
+  const [searchingPacks, setSearchingPacks] = useState(false);
+  const [selectedPack, setSelectedPack] = useState<ModrinthSearchHit | null>(null);
+  const [packVersions, setPackVersions] = useState<ModpackVersionOption[]>([]);
+  const [loadingPackVersions, setLoadingPackVersions] = useState(false);
+  const [selectedPackVersionId, setSelectedPackVersionId] = useState("");
+
+  const actualEngine: ServerEngine =
+    choice === "crossplay" ? "paper" : choice === "modpack" ? "fabric" : choice;
   const isCrossplay = choice === "crossplay";
+  const isModpack = choice === "modpack";
   const isBedrock = actualEngine === "bedrock";
 
   useEffect(() => {
     if (!open) return;
     setStep(1);
     setSubmitting(false);
+    setSelectedPack(null);
+    setPackVersions([]);
+    setSelectedPackVersionId("");
     if (system) {
       setRamMaxMb(Math.min(4096, Math.max(2048, system.recommendedMaxRamMb)));
     }
   }, [open, system]);
 
+  const runModpackSearch = async (q: string, loader = modpackLoaderFilter) => {
+    setSearchingPacks(true);
+    try {
+      const res = await api.searchModpacks(q, loader || undefined);
+      setModpackHits(res.hits);
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setSearchingPacks(false);
+    }
+  };
+
   useEffect(() => {
     if (!open || step !== 2) return;
     if (choice === "custom") {
       if (jars[0] && !selectedJarId) setSelectedJarId(jars[0].id);
+      return;
+    }
+    if (choice === "modpack") {
+      if (modpackHits.length === 0) void runModpackSearch(modpackQuery, modpackLoaderFilter);
+      if (system && ramMaxMb < 4096 && system.recommendedMaxRamMb >= 4096) {
+        setRamMaxMb(4096);
+      }
       return;
     }
 
@@ -149,6 +204,30 @@ export function CreateServerModal({
     };
   }, [open, step, actualEngine, choice]);
 
+  const handleSelectModpack = async (hit: ModrinthSearchHit) => {
+    setSelectedPack(hit);
+    setSelectedPackVersionId("");
+    setPackVersions([]);
+    setLoadingPackVersions(true);
+    if (!name.trim() || name === "Mi Mundo Survival") {
+      setName(hit.title.slice(0, 50));
+    }
+    try {
+      const res = await api.listModpackVersions(
+        hit.projectId,
+        modpackLoaderFilter || undefined
+      );
+      setPackVersions(res.versions);
+      if (res.versions[0]) setSelectedPackVersionId(res.versions[0].versionId);
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setLoadingPackVersions(false);
+    }
+  };
+
+  const chosenPackVersion = packVersions.find((v) => v.versionId === selectedPackVersionId) || null;
+
   const handleCreate = async () => {
     if (!name.trim()) {
       onToast("error", "Escribe un nombre para tu servidor.");
@@ -161,6 +240,31 @@ export function CreateServerModal({
 
     setSubmitting(true);
     try {
+      if (isModpack) {
+        if (!selectedPackVersionId) {
+          onToast("error", "Selecciona un modpack y una versión antes de continuar.");
+          setSubmitting(false);
+          return;
+        }
+        const res = await api.createServerFromModpack({
+          name: name.trim(),
+          modpackVersionId: selectedPackVersionId,
+          ramMinMb: Math.min(2048, ramMaxMb),
+          ramMaxMb,
+          onlineMode,
+          gamemode,
+          difficulty,
+          eulaAccepted: true,
+        });
+        onToast(
+          "success",
+          `¡Servidor "${res.server.name}" creado con "${res.packName}" (${res.downloadedCount} archivos instalados)!`
+        );
+        onCreated(res.server.id);
+        onClose();
+        return;
+      }
+
       const payload: Record<string, unknown> = {
         name: name.trim(),
         engine: actualEngine,
@@ -189,6 +293,12 @@ export function CreateServerModal({
     }
   };
 
+  const canAdvanceStep2 = isModpack
+    ? Boolean(selectedPackVersionId)
+    : choice === "custom"
+    ? Boolean(selectedJarId)
+    : Boolean(mcVersion);
+
   return (
     <Modal
       open={open}
@@ -201,7 +311,7 @@ export function CreateServerModal({
       <div className="flex items-center gap-2 mb-6">
         {[
           { n: 1, label: "Motor y Nombre" },
-          { n: 2, label: "Versión y RAM" },
+          { n: 2, label: isModpack ? "Modpack y RAM" : "Versión y RAM" },
           { n: 3, label: "Confirmar y Crear" },
         ].map((item) => (
           <div
@@ -292,7 +402,126 @@ export function CreateServerModal({
       {/* STEP 2 */}
       {step === 2 && (
         <div className="space-y-5 animate-fade-slide-up">
-          {choice === "custom" ? (
+          {isModpack ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={modpackQuery}
+                    onChange={(e) => setModpackQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void runModpackSearch(modpackQuery, modpackLoaderFilter);
+                      }
+                    }}
+                    placeholder="Buscar modpacks en Modrinth (ej. Cobblemon, Better MC, Create, Prominence)..."
+                    className="w-full bg-canvas border border-border-strong rounded-lg pl-9 pr-3 py-2 text-sm text-text-primary focus:outline-none focus:border-emerald-mc"
+                  />
+                </div>
+                <select
+                  value={modpackLoaderFilter}
+                  onChange={(e) => {
+                    const next = e.target.value as "" | "fabric" | "forge" | "neoforge";
+                    setModpackLoaderFilter(next);
+                    void runModpackSearch(modpackQuery, next);
+                  }}
+                  className="bg-canvas border border-border-strong rounded-lg px-3 py-2 text-xs font-mono text-text-primary"
+                >
+                  <option value="">Todos (Fabric/Forge/NeoForge)</option>
+                  <option value="fabric">Solo Fabric</option>
+                  <option value="neoforge">Solo NeoForge</option>
+                  <option value="forge">Solo Forge</option>
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={searchingPacks}
+                  onClick={() => void runModpackSearch(modpackQuery, modpackLoaderFilter)}
+                >
+                  Buscar
+                </Button>
+              </div>
+
+              {/* Modpack list */}
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {searchingPacks ? (
+                  <div className="py-6 flex items-center justify-center gap-2 text-xs text-text-secondary">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                    Buscando modpacks compatibles con servidor en Modrinth...
+                  </div>
+                ) : (
+                  modpackHits.map((hit) => {
+                    const isPicked = selectedPack?.projectId === hit.projectId;
+                    return (
+                      <button
+                        key={hit.projectId}
+                        type="button"
+                        onClick={() => void handleSelectModpack(hit)}
+                        className={`w-full text-left p-2.5 rounded-lg border flex items-center gap-3 transition-colors ${
+                          isPicked
+                            ? "bg-emerald-500/12 border-emerald-mc"
+                            : "bg-canvas border-border-subtle hover:border-border-strong"
+                        }`}
+                      >
+                        <div className="w-9 h-9 rounded-md bg-elevated overflow-hidden shrink-0 flex items-center justify-center">
+                          {hit.iconUrl ? (
+                            <img src={hit.iconUrl} alt={hit.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <FolderArchive className="w-4 h-4 text-text-muted" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-text-primary truncate">
+                              {hit.title}
+                            </span>
+                            <span className="text-[11px] font-mono text-text-muted shrink-0">
+                              {hit.downloads.toLocaleString("es")} desc.
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-secondary truncate">{hit.description}</p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Version selector for chosen modpack */}
+              {selectedPack && (
+                <div className="bg-canvas border border-emerald-500/30 rounded-lg p-3 space-y-2">
+                  <label className="block text-xs font-semibold text-emerald-300">
+                    Versión del modpack "{selectedPack.title}"
+                  </label>
+                  {loadingPackVersions ? (
+                    <div className="flex items-center gap-2 text-xs text-text-secondary py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      Cargando versiones...
+                    </div>
+                  ) : packVersions.length === 0 ? (
+                    <p className="text-xs text-amber-300">
+                      Este modpack no tiene versiones disponibles para Fabric, Forge o NeoForge.
+                    </p>
+                  ) : (
+                    <select
+                      value={selectedPackVersionId}
+                      onChange={(e) => setSelectedPackVersionId(e.target.value)}
+                      className="w-full bg-surface border border-border-strong rounded-lg px-3 py-2 text-xs font-mono text-text-primary"
+                    >
+                      {packVersions.map((v) => (
+                        <option key={v.versionId} value={v.versionId}>
+                          {v.name} — MC {v.mcVersion} ({v.detectedEngine?.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : choice === "custom" ? (
             <div>
               <label className="block text-sm font-medium text-text-primary mb-2">
                 Elige un archivo .JAR de tu Biblioteca
@@ -414,10 +643,7 @@ export function CreateServerModal({
             <Button variant="secondary" onClick={() => setStep(1)}>
               Atrás
             </Button>
-            <Button
-              onClick={() => setStep(3)}
-              disabled={choice === "custom" ? !selectedJarId : !mcVersion}
-            >
+            <Button onClick={() => setStep(3)} disabled={!canAdvanceStep2}>
               Siguiente
             </Button>
           </div>
@@ -432,20 +658,40 @@ export function CreateServerModal({
               <span className="text-text-secondary">Nombre</span>
               <span className="font-semibold text-text-primary">{name}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-text-secondary">Motor</span>
-              <span className="font-mono text-emerald-400">
-                {isCrossplay ? "Paper + Crossplay (Geyser + Floodgate)" : actualEngine.toUpperCase()}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-secondary">Versión / JAR</span>
-              <span className="font-mono text-text-primary">
-                {choice === "custom"
-                  ? jars.find((j) => j.id === selectedJarId)?.name || "Personalizado"
-                  : mcVersion}
-              </span>
-            </div>
+            {isModpack && selectedPack && chosenPackVersion ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-text-secondary">Modpack (Modrinth)</span>
+                  <span className="font-semibold text-emerald-400">{selectedPack.title}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-text-secondary">Motor y versión detectados</span>
+                  <span className="font-mono text-text-primary">
+                    {chosenPackVersion.detectedEngine?.toUpperCase()} • Minecraft{" "}
+                    {chosenPackVersion.mcVersion}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-text-secondary">Motor</span>
+                  <span className="font-mono text-emerald-400">
+                    {isCrossplay
+                      ? "Paper + Crossplay (Geyser + Floodgate)"
+                      : actualEngine.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-text-secondary">Versión / JAR</span>
+                  <span className="font-mono text-text-primary">
+                    {choice === "custom"
+                      ? jars.find((j) => j.id === selectedJarId)?.name || "Personalizado"
+                      : mcVersion}
+                  </span>
+                </div>
+              </>
+            )}
             {!isBedrock && (
               <div className="flex justify-between">
                 <span className="text-text-secondary">RAM Máxima</span>
@@ -484,7 +730,8 @@ export function CreateServerModal({
                   aka.ms/MinecraftEULA
                 </a>
                 ). CraftDock generará <code className="font-mono">eula.txt</code> automáticamente y
-                descargará la versión correcta de Java si aún no la tienes.
+                descargará Java, el motor{isModpack ? " y todos los mods del modpack" : ""} de forma
+                automática.
               </div>
             </label>
           )}
@@ -498,7 +745,7 @@ export function CreateServerModal({
               loading={submitting}
               disabled={!isBedrock && !eulaAccepted}
             >
-              Crear Servidor Ahora
+              {isModpack ? "Instalar Modpack y Crear Servidor" : "Crear Servidor Ahora"}
             </Button>
           </div>
         </div>

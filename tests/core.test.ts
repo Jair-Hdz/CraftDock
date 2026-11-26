@@ -17,8 +17,18 @@ import {
   renameServerEntry,
   writeServerTextFile,
 } from "../server/services/fileManagerService";
+import {
+  deleteDatapack,
+  listDatapacks,
+  toggleDatapack,
+  uploadDatapackZip,
+} from "../server/services/datapackService";
 import { saveCustomJarToLibrary } from "../server/services/jarLibraryService";
-import { exportModsPackForFriends, uploadModJar } from "../server/services/modrinthService";
+import {
+  detectModpackEngine,
+  exportModsPackForFriends,
+  uploadModJar,
+} from "../server/services/modrinthService";
 import {
   buildDefaultProperties,
   parsePropertiesText,
@@ -26,6 +36,10 @@ import {
 } from "../server/services/propertiesService";
 import { parseBedrockVersionIndex } from "../server/services/providers/bedrockProvider";
 import { parseForgePromotions } from "../server/services/providers/forgeProvider";
+import {
+  neoforgeToMcVersion,
+  parseNeoforgeVersions,
+} from "../server/services/providers/neoforgeProvider";
 import {
   parsePaperBuildsResponse,
   parsePaperProjectVersions,
@@ -293,5 +307,96 @@ describe("Integración: Biblioteca JAR, Backups con retención y Pack de Mods pa
     expect(readmeText).toContain("amigos.gl.joinmc.link");
 
     db.close();
+  });
+});
+
+describe("NeoForge, Modpacks directos y Datapacks", () => {
+  test("mapea versiones de NeoForge a Minecraft 1.20/1.21 y 26.x+ correctamente", () => {
+    expect(neoforgeToMcVersion("20.4.237")).toBe("1.20.4");
+    expect(neoforgeToMcVersion("21.0.167")).toBe("1.21");
+    expect(neoforgeToMcVersion("21.1.265")).toBe("1.21.1");
+    expect(neoforgeToMcVersion("26.3.0.100")).toBe("26.3");
+
+    const parsed = parseNeoforgeVersions([
+      "21.1.10-beta",
+      "21.1.265",
+      "20.4.237",
+      "26.1.0.50",
+    ]);
+    expect(parsed[0].mcVersion).toBe("26.1");
+    expect(parsed[0].javaMajor).toBe(25);
+    expect(parsed[1].mcVersion).toBe("1.21.1");
+    expect(parsed[1].builds?.[0]).toBe("21.1.265");
+  });
+
+  test("detecta el motor de modpacks de Modrinth (Fabric, Forge, NeoForge)", () => {
+    expect(detectModpackEngine(["fabric"])).toBe("fabric");
+    expect(detectModpackEngine(["forge"])).toBe("forge");
+    expect(detectModpackEngine(["neoforge"])).toBe("neoforge");
+    expect(detectModpackEngine(["quilt"])).toBeNull();
+  });
+
+  test("gestiona datapacks (.zip, toggle, borrado) y rechaza archivos falsos o Bedrock", async () => {
+    const srvDir = path.join(sandboxRoot, "srv-datapacks");
+    fs.mkdirSync(srvDir, { recursive: true });
+    fs.writeFileSync(path.join(srvDir, "server.properties"), "level-name=mi_mundo\n");
+
+    const now = new Date().toISOString();
+    const javaServer = {
+      id: "dp-java-1",
+      name: "Vanilla DP",
+      engine: "vanilla" as const,
+      mcVersion: "1.21.4",
+      jarId: null,
+      crossplayEnabled: false,
+      port: 25565,
+      bedrockPort: null,
+      ramMinMb: 1024,
+      ramMaxMb: 2048,
+      javaMajor: 21,
+      autoShutdownMinutes: 0,
+      autoBackupIntervalMinutes: 0,
+      backupRetentionCount: 5,
+      eulaAccepted: true,
+      tunnelAddress: "",
+      tunnelBedrockAddress: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Auto-creates mi_mundo/datapacks even before first launch
+    const initial = listDatapacks(srvDir, javaServer);
+    expect(initial.worldName).toBe("mi_mundo");
+    expect(initial.datapacks.length).toBe(0);
+
+    // Rejects invalid non-zip bytes
+    expect(() =>
+      uploadDatapackZip(srvDir, javaServer, "falso.zip", new TextEncoder().encode("hola"))
+    ).toThrow();
+
+    // Accepts valid zip datapack
+    const validZipPath = path.join(sandboxRoot, "terralith-test.zip");
+    await createZipArchive(validZipPath, [], [
+      { name: "pack.mcmeta", content: JSON.stringify({ pack: { pack_format: 61, description: "Test" } }) },
+    ]);
+    const zipBytes = new Uint8Array(fs.readFileSync(validZipPath));
+
+    const uploaded = uploadDatapackZip(srvDir, javaServer, "terralith.zip", zipBytes);
+    expect(uploaded.enabled).toBe(true);
+    expect(uploaded.worldName).toBe("mi_mundo");
+
+    const disabled = toggleDatapack(srvDir, javaServer, "terralith.zip");
+    expect(disabled.enabled).toBe(false);
+    expect(disabled.fileName).toBe("terralith.zip.disabled");
+
+    const reEnabled = toggleDatapack(srvDir, javaServer, "terralith.zip.disabled");
+    expect(reEnabled.enabled).toBe(true);
+    expect(reEnabled.fileName).toBe("terralith.zip");
+
+    deleteDatapack(srvDir, javaServer, "terralith.zip");
+    expect(listDatapacks(srvDir, javaServer).datapacks.length).toBe(0);
+
+    // Rejects Bedrock server
+    expect(() => listDatapacks(srvDir, { ...javaServer, engine: "bedrock" })).toThrow();
   });
 });

@@ -21,8 +21,13 @@ import {
   readServerProperties,
   writeServerProperties,
 } from "./propertiesService";
+import {
+  importMrpackModpack,
+  resolveModpackVersionDownload,
+} from "./modrinthService";
 import { installForgeIntoServerDir } from "./providers/forgeProvider";
 import { installCrossplayPlugins, removeCrossplayPlugins } from "./providers/geyserProvider";
+import { installNeoforgeIntoServerDir } from "./providers/neoforgeProvider";
 import { ensureJavaRuntime } from "./runtimeManager";
 import {
   detectLanIp,
@@ -308,6 +313,22 @@ export class ServerManager {
       return;
     }
 
+    if (jarItem.engine === "neoforge") {
+      const javaExe = await ensureJavaRuntime(this.db, javaMajor || 21);
+      const launch = await installNeoforgeIntoServerDir(
+        javaExe,
+        jarItem.localPath,
+        serverDir,
+        onLog
+      );
+      fs.writeFileSync(
+        path.join(serverDir, ".craftdock-launch.json"),
+        JSON.stringify(launch, null, 2),
+        "utf-8"
+      );
+      return;
+    }
+
     // Standard Java JAR (Vanilla, Paper, Fabric, Custom)
     const targetJar = path.join(serverDir, "server.jar");
     fs.copyFileSync(jarItem.localPath, targetJar);
@@ -316,6 +337,97 @@ export class ServerManager {
       JSON.stringify({ launchMode: "jar", targetRef: "server.jar" }, null, 2),
       "utf-8"
     );
+  }
+
+  async createServerFromModpack(input: {
+    name?: string;
+    modpackVersionId: string;
+    ramMinMb?: number;
+    ramMaxMb?: number;
+    onlineMode?: boolean;
+    gamemode?: string;
+    difficulty?: string;
+    maxPlayers?: number;
+    eulaAccepted: boolean;
+  }): Promise<{ server: ServerView; packName: string; downloadedCount: number; skippedClientOnly: number }> {
+    if (!input.eulaAccepted) {
+      throw new Error("Debes aceptar el EULA de Minecraft para crear un servidor con Modpack.");
+    }
+
+    const taskId = `modpack-create-${crypto.randomUUID().slice(0, 6)}`;
+    eventBus.emitProgress({
+      taskId,
+      scope: "server",
+      title: "Analizando modpack de Modrinth...",
+      detail: "Leyendo versión de Minecraft y motor (Fabric / Forge / NeoForge)...",
+      percent: 8,
+      status: "running",
+    });
+
+    const resolved = await resolveModpackVersionDownload(input.modpackVersionId);
+    const serverName = input.name?.trim() || resolved.index.name || "Servidor Modpack";
+
+    const server = await this.createServer({
+      name: serverName,
+      engine: resolved.engine,
+      mcVersion: resolved.mcVersion,
+      build: resolved.loaderVersion,
+      ramMinMb: input.ramMinMb ?? 2048,
+      ramMaxMb: input.ramMaxMb ?? 4096,
+      onlineMode: input.onlineMode ?? false,
+      gamemode: input.gamemode || "survival",
+      difficulty: input.difficulty || "normal",
+      maxPlayers: input.maxPlayers ?? 20,
+      eulaAccepted: true,
+    });
+
+    const serverDir = this.getServerDir(server.id);
+    const packResult = await importMrpackModpack(
+      serverDir,
+      this.db.paths.tmpDir,
+      resolved.mrpackBytes
+    );
+
+    eventBus.emitProgress({
+      taskId,
+      scope: "server",
+      title: `¡Servidor con "${packResult.packName}" listo!`,
+      detail: `${packResult.downloadedCount} archivos instalados (${resolved.engine.toUpperCase()} ${resolved.mcVersion}).`,
+      percent: 100,
+      status: "done",
+    });
+
+    return {
+      server: this.getServerView(server.id) || server,
+      ...packResult,
+    };
+  }
+
+  async installModpackOnExistingServer(
+    serverId: string,
+    modpackVersionId: string
+  ): Promise<{ packName: string; downloadedCount: number; skippedClientOnly: number }> {
+    const server = this.db.getServer(serverId);
+    if (!server) throw new Error("Servidor no encontrado.");
+    if (this.isRunning(serverId)) {
+      throw new Error("Apaga el servidor antes de instalar un modpack.");
+    }
+
+    const resolved = await resolveModpackVersionDownload(modpackVersionId);
+    if (server.engine !== resolved.engine) {
+      throw new Error(
+        `Este modpack requiere ${resolved.engine.toUpperCase()}, pero tu servidor usa ${server.engine.toUpperCase()}. Crea un servidor nuevo con este modpack o cambia el .jar primero.`
+      );
+    }
+
+    // Automatic anti-disaster backup before modifying server mods/configs
+    await createServerBackup(this.db, server, {
+      label: `Previo a modpack ${resolved.index.name || "Modrinth"}`,
+      kind: "pre-change",
+    });
+
+    const serverDir = this.getServerDir(serverId);
+    return importMrpackModpack(serverDir, this.db.paths.tmpDir, resolved.mrpackBytes);
   }
 
   async changeServerJar(serverId: string, jarId: string): Promise<ServerView> {
@@ -820,6 +932,7 @@ export class ServerManager {
       paper: view.crossplayEnabled ? "Paper Crossplay (Java + Bedrock)" : "Minecraft Java (Paper)",
       fabric: "Minecraft Java (Fabric con Mods)",
       forge: "Minecraft Java (Forge con Mods)",
+      neoforge: "Minecraft Java (NeoForge con Mods)",
       bedrock: "Minecraft Bedrock",
       custom: "Minecraft Java (.jar personalizado)",
     };
@@ -843,7 +956,7 @@ export class ServerManager {
       lines.push(`📱 Puerto Bedrock local: ${view.port}`);
     }
 
-    if (view.engine === "fabric" || view.engine === "forge") {
+    if (view.engine === "fabric" || view.engine === "forge" || view.engine === "neoforge") {
       lines.push(`🧩 Nota: Requiere instalar el pack de mods (${view.engine.toUpperCase()} ${view.mcVersion}).`);
     }
 

@@ -15,6 +15,7 @@ import { listBedrockVersions, resolveBedrockDownload } from "./providers/bedrock
 import { listFabricVersions, resolveFabricDownload } from "./providers/fabricProvider";
 import { listForgeVersions, resolveForgeDownload } from "./providers/forgeProvider";
 import { listMojangVersions, resolveMojangServerDownload } from "./providers/mojangProvider";
+import { listNeoforgeVersions, resolveNeoforgeDownload } from "./providers/neoforgeProvider";
 import { listPaperBuilds, listPaperVersions, resolvePaperDownload } from "./providers/paperProvider";
 import { getRequiredJavaMajor } from "./systemInfo";
 
@@ -31,6 +32,8 @@ export async function listRemoteVersions(
       return listFabricVersions(includeSnapshots);
     case "forge":
       return listForgeVersions();
+    case "neoforge":
+      return listNeoforgeVersions();
     case "bedrock":
       return listBedrockVersions();
     case "custom":
@@ -45,6 +48,10 @@ export async function listRemoteBuilds(engine: ServerEngine, mcVersion: string):
   }
   if (engine === "forge") {
     const versions = await listForgeVersions();
+    return versions.find((v) => v.mcVersion === mcVersion)?.builds || [];
+  }
+  if (engine === "neoforge") {
+    const versions = await listNeoforgeVersions();
     return versions.find((v) => v.mcVersion === mcVersion)?.builds || [];
   }
   return ["latest"];
@@ -102,6 +109,12 @@ export async function downloadOfficialJarToLibrary(
       build = info.build;
       javaMajor = info.javaMajor;
       fileName = sanitizeFileName(info.fileName);
+    } else if (engine === "neoforge") {
+      const info = await resolveNeoforgeDownload(mcVersion, requestedBuild);
+      downloadUrl = info.url;
+      build = info.build;
+      javaMajor = info.javaMajor;
+      fileName = sanitizeFileName(info.fileName);
     } else if (engine === "bedrock") {
       const info = await resolveBedrockDownload(mcVersion);
       downloadUrl = info.url;
@@ -150,6 +163,7 @@ export async function downloadOfficialJarToLibrary(
       paper: "Paper",
       fabric: "Fabric",
       forge: "Forge",
+      neoforge: "NeoForge",
       bedrock: "Bedrock Oficial",
     };
 

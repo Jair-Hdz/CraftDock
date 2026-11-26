@@ -121,6 +121,7 @@ export function EngineBadge({
     },
     fabric: { label: "Fabric", cls: "bg-yellow-500/12 text-yellow-300 border-yellow-500/25" },
     forge: { label: "Forge", cls: "bg-orange-500/12 text-orange-300 border-orange-500/25" },
+    neoforge: { label: "NeoForge", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
     bedrock: { label: "Bedrock", cls: "bg-sky-500/12 text-sky-300 border-sky-500/25" },
     custom: { label: ".JAR Propio", cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" },
   };

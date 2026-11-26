@@ -1,9 +1,11 @@
 import type {
   BackupRecord,
+  DatapackItem,
   FileEntry,
   GlobalSettings,
   JarLibraryItem,
   ModItem,
+  ModpackVersionOption,
   ModrinthSearchHit,
   PlayersState,
   RamZone,
@@ -74,6 +76,34 @@ export const api = {
   installTunnel: () => apiFetch<{ tunnel: TunnelStatus }>("/api/tunnel/install", { method: "POST" }),
   startTunnel: () => apiFetch<{ tunnel: TunnelStatus }>("/api/tunnel/start", { method: "POST" }),
   stopTunnel: () => apiFetch<{ tunnel: TunnelStatus }>("/api/tunnel/stop", { method: "POST" }),
+
+  // Global Modpacks (Modrinth Direct)
+  searchModpacks: (q: string, loader?: string, mcVersion?: string) => {
+    const qs = new URLSearchParams({ q });
+    if (loader) qs.set("loader", loader);
+    if (mcVersion) qs.set("mcVersion", mcVersion);
+    return apiFetch<{ hits: ModrinthSearchHit[] }>(`/api/modpacks/search?${qs.toString()}`);
+  },
+  listModpackVersions: (projectId: string, loader?: string, mcVersion?: string) => {
+    const qs = new URLSearchParams();
+    if (loader) qs.set("loader", loader);
+    if (mcVersion) qs.set("mcVersion", mcVersion);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiFetch<{ versions: ModpackVersionOption[] }>(
+      `/api/modpacks/${encodeURIComponent(projectId)}/versions${suffix}`
+    );
+  },
+  createServerFromModpack: (payload: Record<string, unknown>) =>
+    apiFetch<{
+      server: ServerView;
+      packName: string;
+      downloadedCount: number;
+      skippedClientOnly: number;
+    }>("/api/servers/from-modpack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
 
   // Servers
   listServers: () => apiFetch<{ servers: ServerView[] }>("/api/servers"),
@@ -187,6 +217,15 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId }),
     }),
+  installModpackOnServer: (id: string, modpackVersionId: string) =>
+    apiFetch<{ packName: string; downloadedCount: number; skippedClientOnly: number }>(
+      `/api/servers/${id}/mods/modrinth/install-modpack`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modpackVersionId }),
+      }
+    ),
   importMrpack: (id: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -195,6 +234,45 @@ export const api = {
       { method: "POST", body: form }
     );
   },
+
+  // Datapacks
+  listDatapacks: (id: string) =>
+    apiFetch<{ datapacks: DatapackItem[]; worldName: string }>(`/api/servers/${id}/datapacks`),
+  uploadDatapack: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiFetch<{ datapack: DatapackItem }>(`/api/servers/${id}/datapacks/upload`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  toggleDatapack: (id: string, fileName: string) =>
+    apiFetch<{ datapack: DatapackItem }>(`/api/servers/${id}/datapacks/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName }),
+    }),
+  deleteDatapack: (id: string, fileName: string) =>
+    apiFetch<{ ok: boolean }>(`/api/servers/${id}/datapacks/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName }),
+    }),
+  reloadDatapacks: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/servers/${id}/datapacks/reload`, { method: "POST" }),
+  searchModrinthDatapacks: (id: string, q: string) =>
+    apiFetch<{ hits: ModrinthSearchHit[] }>(
+      `/api/servers/${id}/datapacks/modrinth/search?q=${encodeURIComponent(q)}`
+    ),
+  installModrinthDatapack: (id: string, projectId: string) =>
+    apiFetch<{ fileName: string; worldName: string }>(
+      `/api/servers/${id}/datapacks/modrinth/install`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      }
+    ),
 
   // Backups & Worlds
   listBackups: (id: string) => apiFetch<{ backups: BackupRecord[] }>(`/api/servers/${id}/backups`),

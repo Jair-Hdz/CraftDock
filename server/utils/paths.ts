@@ -51,6 +51,7 @@ export function ensureDataDirectories(paths: DataPaths): void {
     path.join(paths.libraryDir, "paper"),
     path.join(paths.libraryDir, "fabric"),
     path.join(paths.libraryDir, "forge"),
+    path.join(paths.libraryDir, "neoforge"),
     path.join(paths.libraryDir, "bedrock"),
     path.join(paths.libraryDir, "custom"),
     paths.serversDir,
