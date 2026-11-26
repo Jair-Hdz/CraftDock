@@ -28,31 +28,6 @@
 
 ---
 
-## Desarrollo y Compilación desde Código Fuente
-
-Requisitos para compilar (los usuarios finales de `CraftDock.exe` **no** necesitan nada de esto):
-- [Bun](https://bun.sh/) v1.2+ en Windows 10/11 x64
-
-```powershell
-# 1. Instalar dependencias
-bun install
-
-# 2. Modo desarrollo (Backend + Vite)
-bun run dev
-
-# 3. Verificación de tipos y pruebas automatizadas
-bun run typecheck
-bun test
-
-# 4. Compilar ejecutable standalone dist/CraftDock.exe
-bun run build:exe
-
-# 5. Generar paquete de distribución ZIP con LEEME y SHA256SUMS
-bun run package:zip
-```
-
----
-
 ## Aviso Legal
 
 CraftDock es un proyecto independiente y **no** es un producto oficial de Minecraft ni está aprobado ni asociado con Mojang AB o Microsoft. Al crear servidores aceptas el [EULA de Minecraft](https://aka.ms/MinecraftEULA).
