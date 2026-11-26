@@ -2,19 +2,21 @@
 
 **Gestor local de servidores de Minecraft para Windows 10/11** empaquetado en un único ejecutable (`CraftDock.exe`), pensado para gamers que quieren crear, editar y compartir servidores con amigos de todo el país sin abrir puertos del router ni instalar Java manualmente.
 
-> **Descarga directa para Windows:** Ve a [**Releases**](https://github.com/Jair-Hdz/CraftDock/releases/latest), descarga `CraftDock-v1.0.0-Windows-x64.zip`, descomprímelo y abre `CraftDock.exe`.
+> **Descarga directa para Windows:** Ve a [**Releases**](https://github.com/Jair-Hdz/CraftDock/releases/latest), descarga `CraftDock-v1.1.0-Windows-x64.zip`, descomprímelo y abre `CraftDock.exe`.
 
 ---
 
 ## Características principales
 
-- **Todos los motores oficiales + `.jar` propios:** Java Vanilla, Paper (plugins), **Crossplay Java + Bedrock (Paper + Geyser + Floodgate en 1 clic)**, Fabric, Forge, Bedrock oficial de Windows y **Biblioteca de `.JAR`** para reutilizar versiones o subir tu propio `.jar` (Purpur, Spigot, Mohist, etc.).
+- **Todos los motores oficiales + `.jar` propios:** Java Vanilla, Paper (plugins), **Crossplay Java + Bedrock (Paper + Geyser + Floodgate en 1 clic)**, Fabric, **NeoForge**, Forge, Bedrock oficial de Windows y **Biblioteca de `.JAR`** para reutilizar versiones o subir tu propio `.jar` (Purpur, Spigot, Mohist, etc.).
+- **Modpacks directos desde Modrinth:** Crea un servidor en 1 clic eligiendo un modpack de Modrinth (detecta automáticamente Minecraft, motor Fabric/Forge/NeoForge y Java) o instálalo en un servidor existente con respaldo automático previo.
+- **Apartado dedicado de Datapacks:** Busca e instala datapacks directo desde Modrinth, sube `.zip` arrastrando, activa/desactiva y recarga con `/reload` en cualquier servidor Java.
 - **Java automático (Adoptium Temurin):** Descarga e instala de forma portable la versión exacta de Java según la versión de Minecraft (**Java 8, 17, 21 y 25** para `26.x`).
 - **Conexión remota gratuita (`playit.gg`):** Túnel TCP (Java) y UDP (Bedrock/Crossplay) integrado sin configurar el router ni exponer tu IP real. Tus amigos no instalan nada.
-- **Edición visual completa:** `server.properties` con controles claros (incluyendo modo **Premium / No-Premium**), selector de RAM con semáforo según la RAM real de tu PC, ícono `server-icon.png` (recorte automático 64×64), consola en vivo, monitor de recursos y gestión de jugadores (OP, kick, ban, whitelist).
+- **Edición visual completa:** `server.properties` con controles claros (incluyendo modo **Premium / No-Premium** y **Generar Nuevo Mundo** con nueva seed y conservación de Datapacks), selector de RAM con semáforo según la RAM real de tu PC, ícono `server-icon.png` (recorte automático 64×64), consola en vivo, monitor de recursos y gestión de jugadores (OP, kick, ban, whitelist).
 - **Mods, Plugins y Modpacks:** Arrastrar `.jar`, activar/desactivar, buscador e instalación directa desde **Modrinth**, importación de `.mrpack` y exportación de pack `.zip` listo para pasarle a tus amigos.
 - **Biblioteca / Explorador de archivos con editor integrado:** Navega, crea, sube, renombra y edita archivos de configuración (`.properties`, `.yml`, `.json`, `.toml`, `.mcfunction`, etc.) con **CodeMirror 6** (`Ctrl+S`).
-- **Seguridad para tus mundos:** Respaldos en 1 clic, respaldos automáticos anti-desastres antes de cambiar `.jar` o restaurar, cierre seguro (`save-all` + `stop`), auto-apagado sin jugadores y **detector inteligente de errores** en español.
+- **Seguridad para tus mundos:** Respaldos en 1 clic, respaldos automáticos anti-desastres antes de cambiar `.jar`, restaurar o regenerar el mundo, cierre seguro (`save-all` + `stop`), auto-apagado sin jugadores y **detector inteligente de errores** en español.
 
 ---
 
