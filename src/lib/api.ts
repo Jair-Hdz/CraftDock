@@ -296,6 +296,20 @@ export const api = {
       body: form,
     });
   },
+  regenerateWorld: (
+    id: string,
+    options: { newSeed?: string; createBackupFirst?: boolean; keepDatapacks?: boolean }
+  ) =>
+    apiFetch<{
+      deletedFolders: string[];
+      preservedDatapacks: boolean;
+      backupCreated: boolean;
+      newSeed: string;
+    }>(`/api/servers/${id}/worlds/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options),
+    }),
 
   // File Library
   listFiles: (id: string, relPath = "") =>

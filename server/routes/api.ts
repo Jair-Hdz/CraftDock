@@ -8,6 +8,7 @@ import {
   deleteServerBackup,
   exportWorldZip,
   importWorldZip,
+  regenerateServerWorld,
   restoreServerBackup,
 } from "../services/backupService";
 import {
@@ -629,6 +630,22 @@ export async function handleApiRequest(req: Request, ctx: ApiContext): Promise<R
             "Content-Disposition": `attachment; filename="${fileName}"`,
           },
         });
+      }
+      if (sub === "worlds/regenerate" && method === "POST") {
+        if (ctx.serverManager.isRunning(serverId)) {
+          return errorJson("Apaga el servidor antes de generar un mundo nuevo.");
+        }
+        const body = (await req.json().catch(() => ({}))) as {
+          newSeed?: string;
+          createBackupFirst?: boolean;
+          keepDatapacks?: boolean;
+        };
+        const result = await regenerateServerWorld(ctx.db, server, {
+          newSeed: body.newSeed,
+          createBackupFirst: body.createBackupFirst,
+          keepDatapacks: body.keepDatapacks,
+        });
+        return json(result);
       }
 
       // File Manager & Built-in Code Editor

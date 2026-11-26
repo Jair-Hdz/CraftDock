@@ -77,6 +77,12 @@ export function ServerDetailView({
   const [savingSettings, setSavingSettings] = useState(false);
   const [switchingJar, setSwitchingJar] = useState(false);
 
+  // Regenerate World state
+  const [regenSeed, setRegenSeed] = useState("");
+  const [regenBackup, setRegenBackup] = useState(true);
+  const [regenKeepDatapacks, setRegenKeepDatapacks] = useState(true);
+  const [regeneratingWorld, setRegeneratingWorld] = useState(false);
+
   // Players tab state
   const [players, setPlayers] = useState<PlayersState | null>(null);
   const [playerInput, setPlayerInput] = useState("");
@@ -245,6 +251,41 @@ export function ServerDetailView({
       onServerDeleted(server.id);
     } catch (err: any) {
       onToast("error", err.message);
+    }
+  };
+
+  const handleRegenerateWorld = async () => {
+    if (isOnline) {
+      onToast("error", "Apaga el servidor antes de generar un nuevo mundo.");
+      return;
+    }
+    const confirmMsg = regenBackup
+      ? `¿Eliminar el mundo actual de "${server.name}" y generar uno nuevo?\n\nSe creará un respaldo de seguridad antes de borrar.`
+      : `¿Eliminar DEFINITIVAMENTE el mundo actual de "${server.name}" (Overworld, Nether y End) sin respaldo y generar uno nuevo?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setRegeneratingWorld(true);
+    try {
+      const res = await api.regenerateWorld(server.id, {
+        newSeed: regenSeed.trim(),
+        createBackupFirst: regenBackup,
+        keepDatapacks: regenKeepDatapacks,
+      });
+      if (propsForm) {
+        setPropsForm({ ...propsForm, levelSeed: res.newSeed });
+      }
+      setRegenSeed("");
+      onToast(
+        "success",
+        `¡Mundo eliminado${res.backupCreated ? " (con respaldo guardado)" : ""}${
+          res.preservedDatapacks ? " y Datapacks conservados" : ""
+        }! Enciende el servidor para generar el nuevo mundo.`
+      );
+    } catch (err: any) {
+      onToast("error", err.message);
+    } finally {
+      setRegeneratingWorld(false);
     }
   };
 
@@ -806,6 +847,85 @@ export function ServerDetailView({
                   </Button>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Regenerate New World Card */}
+          <div className="bg-red-500/8 border border-red-500/25 rounded-xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-red-200 flex items-center gap-2">
+                  <RotateCw className="w-4 h-4 text-red-400" />
+                  Generar Nuevo Mundo (Eliminar mundo actual)
+                </h3>
+                <p className="text-xs text-red-200/80 mt-0.5">
+                  ¿No te gustó el mapa que se generó? Elimina el mundo actual (Overworld, Nether y
+                  End) para que Minecraft cree uno completamente nuevo al encender el servidor.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-text-secondary mb-1">
+                  Nueva semilla / Seed (déjalo vacío para una aleatoria)
+                </label>
+                <input
+                  type="text"
+                  value={regenSeed}
+                  onChange={(e) => setRegenSeed(e.target.value)}
+                  disabled={isOnline}
+                  placeholder="Opcional (ej. 123456789 o vacío = aleatoria)"
+                  className="w-full bg-canvas border border-border-strong rounded-lg px-3 py-2 text-sm font-mono text-text-primary disabled:opacity-50"
+                />
+              </div>
+
+              <div className="flex flex-col justify-center gap-2">
+                <label className="flex items-center gap-2.5 text-xs text-text-primary cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={regenBackup}
+                    onChange={(e) => setRegenBackup(e.target.checked)}
+                    disabled={isOnline}
+                    className="accent-[#1BD96A] w-4 h-4"
+                  />
+                  Guardar un respaldo automático antes de eliminar el mundo actual
+                </label>
+
+                {server.engine !== "bedrock" && (
+                  <label className="flex items-center gap-2.5 text-xs text-text-primary cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={regenKeepDatapacks}
+                      onChange={(e) => setRegenKeepDatapacks(e.target.checked)}
+                      disabled={isOnline}
+                      className="accent-[#1BD96A] w-4 h-4"
+                    />
+                    Conservar mis Datapacks instalados (ej. Terralith / Tectonic) en el mundo nuevo
+                  </label>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              {isOnline ? (
+                <p className="text-xs text-amber-300">
+                  Apaga el servidor primero para poder eliminar y regenerar el mundo.
+                </p>
+              ) : (
+                <p className="text-xs text-text-muted">
+                  Al terminar, presiona <strong>Encender Servidor</strong> para generar el nuevo mapa.
+                </p>
+              )}
+              <Button
+                variant="danger"
+                disabled={isOnline}
+                loading={regeneratingWorld}
+                onClick={handleRegenerateWorld}
+              >
+                <Trash2 className="w-4 h-4" />
+                Eliminar Mundo y Generar Nuevo
+              </Button>
             </div>
           </div>
         </div>

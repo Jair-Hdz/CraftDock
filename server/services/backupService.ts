@@ -6,7 +6,7 @@ import type { CraftDockDB } from "../db/database";
 import { eventBus } from "../utils/eventBus";
 import { sanitizeFileName } from "../utils/paths";
 import { createZipArchive, extractZipArchive, isZipMagicBytes } from "../utils/zip";
-import { readServerProperties } from "./propertiesService";
+import { readServerProperties, writeServerProperties } from "./propertiesService";
 
 export function getWorldFolders(serverDir: string, server: ServerRecord): string[] {
   const props = readServerProperties(serverDir, server.engine, server.port, server.name);
@@ -287,4 +287,85 @@ export async function exportWorldZip(
     }))
   );
   return { zipPath, fileName };
+}
+
+export async function regenerateServerWorld(
+  db: CraftDockDB,
+  server: ServerRecord,
+  options?: {
+    newSeed?: string;
+    createBackupFirst?: boolean;
+    keepDatapacks?: boolean;
+  }
+): Promise<{
+  deletedFolders: string[];
+  preservedDatapacks: boolean;
+  backupCreated: boolean;
+  newSeed: string;
+}> {
+  const serverDir = path.join(db.paths.serversDir, server.id);
+  const props = readServerProperties(serverDir, server.engine, server.port, server.name);
+  const worldName =
+    props.levelName || (server.engine === "bedrock" ? "Bedrock level" : "world");
+  const existingFolders = getWorldFolders(serverDir, server);
+
+  let backupCreated = false;
+  if (options?.createBackupFirst && existingFolders.length > 0) {
+    await createServerBackup(db, server, {
+      label: "Previo a generar nuevo mundo",
+      kind: "pre-change",
+    });
+    backupCreated = true;
+  }
+
+  // Optionally preserve Java datapacks before deleting the world folder
+  const shouldKeepDatapacks =
+    server.engine !== "bedrock" && (options?.keepDatapacks ?? true);
+  const datapacksDir = path.join(serverDir, worldName, "datapacks");
+  let tempDatapacksDir: string | null = null;
+  let preservedDatapacks = false;
+
+  if (shouldKeepDatapacks && fs.existsSync(datapacksDir)) {
+    const entries = fs.readdirSync(datapacksDir);
+    if (entries.length > 0) {
+      tempDatapacksDir = path.join(
+        db.paths.tmpDir,
+        `keep-dp-${server.id}-${Date.now()}`
+      );
+      fs.cpSync(datapacksDir, tempDatapacksDir, { recursive: true });
+      preservedDatapacks = true;
+    }
+  }
+
+  try {
+    // Delete all world dimension folders
+    for (const folder of existingFolders) {
+      const full = path.join(serverDir, folder);
+      if (fs.existsSync(full)) {
+        fs.rmSync(full, { recursive: true, force: true });
+      }
+    }
+
+    // Update level-seed in server.properties (empty string => random new seed)
+    const cleanSeed = (options?.newSeed ?? "").trim();
+    writeServerProperties(serverDir, server.engine, { levelSeed: cleanSeed });
+
+    // Restore datapacks folder so world-gen datapacks (Terralith, Tectonic, etc.) apply immediately on new world gen
+    if (tempDatapacksDir && fs.existsSync(tempDatapacksDir)) {
+      const nextDatapacksDir = path.join(serverDir, worldName, "datapacks");
+      fs.mkdirSync(nextDatapacksDir, { recursive: true });
+      fs.cpSync(tempDatapacksDir, nextDatapacksDir, { recursive: true });
+    }
+
+    return {
+      deletedFolders: existingFolders,
+      preservedDatapacks,
+      backupCreated,
+      newSeed: cleanSeed,
+    };
+  } finally {
+    if (tempDatapacksDir && fs.existsSync(tempDatapacksDir)) {
+      fs.rmSync(tempDatapacksDir, { recursive: true, force: true });
+    }
+  }
 }

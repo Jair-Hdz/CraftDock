@@ -6,6 +6,7 @@ import { CraftDockDB } from "../server/db/database";
 import {
   createServerBackup,
   enforceBackupRetention,
+  regenerateServerWorld,
   restoreServerBackup,
 } from "../server/services/backupService";
 import { analyzeCrashLogs } from "../server/services/crashAnalyzer";
@@ -398,5 +399,66 @@ describe("NeoForge, Modpacks directos y Datapacks", () => {
 
     // Rejects Bedrock server
     expect(() => listDatapacks(srvDir, { ...javaServer, engine: "bedrock" })).toThrow();
+  });
+
+  test("regenera un mundo nuevo eliminando dimensiones, aplicando nueva seed y conservando datapacks", async () => {
+    const dataDir = path.join(sandboxRoot, "appdata-regen");
+    const db = new CraftDockDB(dataDir);
+    const now = new Date().toISOString();
+    const srvRecord = {
+      id: "srv-regen-1",
+      name: "Mundo Nuevo Test",
+      engine: "vanilla" as const,
+      mcVersion: "1.21.4",
+      jarId: null,
+      crossplayEnabled: false,
+      port: 25565,
+      bedrockPort: null,
+      ramMinMb: 1024,
+      ramMaxMb: 2048,
+      javaMajor: 21,
+      autoShutdownMinutes: 0,
+      autoBackupIntervalMinutes: 0,
+      backupRetentionCount: 5,
+      eulaAccepted: true,
+      tunnelAddress: "",
+      tunnelBedrockAddress: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.insertServer(srvRecord);
+
+    const srvDir = path.join(db.paths.serversDir, srvRecord.id);
+    fs.mkdirSync(path.join(srvDir, "world", "datapacks"), { recursive: true });
+    fs.mkdirSync(path.join(srvDir, "world_nether"), { recursive: true });
+    fs.mkdirSync(path.join(srvDir, "world_the_end"), { recursive: true });
+    fs.writeFileSync(path.join(srvDir, "world", "level.dat"), "OLD_WORLD");
+    fs.writeFileSync(path.join(srvDir, "world", "datapacks", "terralith.zip"), "DP_ZIP");
+    fs.writeFileSync(
+      path.join(srvDir, "server.properties"),
+      "level-name=world\nlevel-seed=oldseed\nserver-port=25565\n"
+    );
+
+    const res = await regenerateServerWorld(db, srvRecord, {
+      newSeed: "987654321",
+      createBackupFirst: true,
+      keepDatapacks: true,
+    });
+
+    expect(res.backupCreated).toBe(true);
+    expect(res.preservedDatapacks).toBe(true);
+    expect(res.deletedFolders).toEqual(["world", "world_nether", "world_the_end"]);
+    expect(fs.existsSync(path.join(srvDir, "world", "level.dat"))).toBe(false);
+    expect(fs.existsSync(path.join(srvDir, "world_nether"))).toBe(false);
+    expect(fs.existsSync(path.join(srvDir, "world_the_end"))).toBe(false);
+    expect(fs.existsSync(path.join(srvDir, "world", "datapacks", "terralith.zip"))).toBe(true);
+
+    const nextProps = parsePropertiesText(
+      fs.readFileSync(path.join(srvDir, "server.properties"), "utf-8")
+    );
+    expect(nextProps["level-seed"]).toBe("987654321");
+    expect(db.listBackups(srvRecord.id).length).toBe(1);
+
+    db.close();
   });
 });
